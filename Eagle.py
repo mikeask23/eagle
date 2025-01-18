@@ -2,7 +2,7 @@ import asyncio
 import os
 from playwright.async_api import async_playwright
 from dotenv import load_dotenv
-from utils.dolphin_anty_utils import authorize_dolphin_anty, launch_profile
+from utils.dolphin_anty_utils import authorize_dolphin_anty, launch_profile, stop_profile
 from utils.page_processing import process_page
 from utils.user_input_utils import start_input_listener
 from utils.screenshot_utils import take_screenshot
@@ -17,6 +17,10 @@ async def main():
 
     if not api_token or not await authorize_dolphin_anty(api_token):
         return
+
+    # First stop any existing profile
+    await stop_profile(profile_id)
+    await asyncio.sleep(2)  # Give it a moment to fully stop
 
     port, ws_endpoint = await launch_profile(profile_id)
     if not port or not ws_endpoint:
@@ -73,8 +77,19 @@ async def main():
         await screenshot_queue.put("quit")
         await screenshot_task
 
-        await context.close()
-        await browser.close()
+        try:
+            await context.close()
+            await browser.close()
+        finally:
+            if context:
+                await context.close()
+            if browser:
+                await browser.close()
+            if p:
+                await p.stop()
+        
+        # Make sure to stop the Dolphin profile at the end
+        await stop_profile(profile_id)
 
 if __name__ == "__main__":
     try:

@@ -8,7 +8,7 @@ from utils.html_saving import save_html, save_html_cc
 from utils.curl_cffi_request import make_curl_cffi_request
 from utils.screenshot_utils import take_screenshot
 from utils.api_handling import save_api_response
-from utils.html_processing import extract_and_repair_json
+from utils.html_processing import find_keywords_and_objects_in_scripts, process_html_files
 from urllib.parse import urlparse
 
 async def process_page(page, url, next_url_event):
@@ -49,7 +49,7 @@ async def process_page(page, url, next_url_event):
                             "response_body": response_body,
                         }
                         captured_requests.append(data)
-                        save_api_response(response_body, request.url, api_dir)  # Save to api_dir
+                        save_api_response(response_body, request.url, api_dir)
                 elif "text/html" in content_type or "application/javascript" in content_type:
                     response_body = await response.text()
                     print(f"    Response body received as text.")
@@ -59,10 +59,9 @@ async def process_page(page, url, next_url_event):
                             "response_body": response_body,
                         }
                         captured_requests.append(data)
-                        save_api_response(response_body, request.url, api_dir)  # Save to api_dir
+                        save_api_response(response_body, request.url, api_dir)
                 else:
                     print(f"    Unsupported content type: {content_type}")
-
             except Exception as e:
                 print(f"    Error processing response: {e}")
 
@@ -73,39 +72,27 @@ async def process_page(page, url, next_url_event):
     try:
         await page.goto(url, timeout=60000)
 
-        # Save the full HTML content after page is loaded
-        html_filename = url.split('//')[1].replace('/', '_') + ".html"
-        await save_html(page, url, htmls_dir)  # Save to htmls_dir
+        # Save the browser-rendered HTML
+        await save_html(page, url)
 
-        # Make a request using curl_cffi and save the response (in the background)
-        cc_response = await make_curl_cffi_request(url, website_dir)
+        # Make a request using curl_cffi and save the response
+        cc_response = await make_curl_cffi_request(url)
+        if cc_response:
+            await save_html_cc(cc_response, url)
 
-        # Construct path for the curl_cffi HTML file
-        cc_html_filename = f"{domain}_cc.html"
-        cc_html_path = os.path.join(htmls_dir, cc_html_filename)
+        # Process both HTML files to extract JSON data
+        process_html_files(url)
 
-        # Extract and repair JSON from HTML
-        html_path = os.path.join(htmls_dir, html_filename)
-        if os.path.exists(html_path):
-            with open(html_path, "r", encoding="utf-8") as f:
-                html_content = f.read()
-
-            # Extract and repair JSON from both HTML files
-            extract_and_repair_json(html_content, json_dir, cc_html_path)
-
-        # Wait for the user to signal for the next URL
+        # Wait for user input to move to next URL
         print("  Waiting for 'n' key to proceed to the next URL...")
-        await next_url_event.wait()
+        if next_url_event:
+            await next_url_event.wait()
 
     except TimeoutError:
         print(f"  Timeout navigating to {url}. Proceeding anyway.")
     except Exception as e:
-        print(f"  Error navigating to {url}: {e}")
-    finally:
-        page.remove_listener("response", handle_response)
+        print(f"  Error processing {url}: {e}")
 
-        # Save captured requests to JSON file (in api_dir)
-        output_file_path = os.path.join(api_dir, "captured_requests.json")
-        with open(output_file_path, "w") as f:
-            json.dump(captured_requests, f, indent=2)
-        print(f"Captured requests for {url} saved to {output_file_path}")
+    # Clear the event for the next URL
+    if next_url_event:
+        next_url_event.clear()
