@@ -1,10 +1,10 @@
-# html_processing.py
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse
 import re
 import json_repair
 import json
 import os
+from collections import defaultdict
 
 def find_keywords_and_objects_in_scripts(html_content, output_path, source_type="browser"):
     """
@@ -37,7 +37,9 @@ def find_keywords_and_objects_in_scripts(html_content, output_path, source_type=
 
     all_keywords = product_identifiers + pricing_keywords + product_attributes
 
-    results = []
+    # Store results with their keyword counts
+    results_by_keywords = defaultdict(list)
+    
     for script_tag in script_tags:
         script_content = script_tag.string
         if script_content:
@@ -62,16 +64,26 @@ def find_keywords_and_objects_in_scripts(html_content, output_path, source_type=
                     continue
 
             if keywords_found or repaired_json_objects:
-                results.append({
+                result = {
                     "script_content": script_content,
                     "keywords_found": keywords_found,
                     "json_objects": repaired_json_objects
-                })
+                }
+                results_by_keywords[len(keywords_found)].append(result)
 
-    # Save results
+    # Get the two highest keyword counts
+    keyword_counts = sorted(results_by_keywords.keys(), reverse=True)
+    top_two_counts = keyword_counts[:2] if len(keyword_counts) >= 2 else keyword_counts
+
+    # Combine results with the two highest keyword counts
+    filtered_results = []
+    for count in top_two_counts:
+        filtered_results.extend(results_by_keywords[count])
+
+    # Save filtered results
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     with open(output_path, "w", encoding="utf-8") as outfile:
-        json.dump(results, outfile, indent=4, ensure_ascii=False)
+        json.dump(filtered_results, outfile, indent=4, ensure_ascii=False)
 
 def process_html_files(url, base_dir="websites"):
     """
